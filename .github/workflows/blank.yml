@@ -1,36 +1,138 @@
-# This is a basic workflow to help you get started with Actions
+name: Healthcare Data Analysis and Predictive Modeling
 
-name: CI
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "master" branch
   push:
-    branches: [ "master" ]
+    branches:
+      - master
   pull_request:
-    branches: [ "master" ]
+    branches:
+      - master
 
-  # Allows you to run this workflow manually from the Actions tab
-  workflow_dispatch:
-
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
   build:
-    # The type of runner that the job will run on
     runs-on: ubuntu-latest
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+    - name: Checkout repository
+      uses: actions/checkout@v2
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
+    - name: Set up Python
+      uses: actions/setup-python@v2
+      with:
+        python-version: '3.8'
 
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
-        run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pandas matplotlib seaborn scikit-learn imbalanced-learn
+
+    - name: Run analysis script
+      run: |
+        python -c "
+        import pandas as pd
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        from sklearn.preprocessing import LabelEncoder, StandardScaler
+        from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+        from sklearn.ensemble import RandomForestClassifier
+        from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
+        from imblearn.over_sampling import SMOTE
+
+        # Load the dataset
+        data = pd.read_csv('healthcare dataset (2).csv')
+
+        # Standardize column names
+        data.columns = data.columns.str.strip().str.lower().str.replace(' ', '_').str.replace('(', '').str.replace(')', '')
+
+        # Correct data types
+        data['date_of_admission'] = pd.to_datetime(data['date_of_admission'])
+        data['discharge_date'] = pd.to_datetime(data['discharge_date'])
+
+        # Feature Engineering
+        label_encoders = {}
+        for column in ['gender', 'blood_type', 'medical_condition', 'doctor_name', 'hospital_name', 'insurance_provider', 'admission_type', 'medication', 'test_results']:
+            le = LabelEncoder()
+            data[column] = le.fit_transform(data[column])
+            label_encoders[column] = le
+
+        # Creating new features
+        data['length_of_stay'] = (data['discharge_date'] - data['date_of_admission']).dt.days
+
+        # Drop columns not needed for modeling
+        data.drop(columns=['patient_name', 'date_of_admission', 'discharge_date'], inplace=True)
+
+        # Split the dataset into features and target variable
+        X = data.drop('test_results', axis=1)
+        y = data['test_results']
+
+        # Handle class imbalance
+        smote = SMOTE(random_state=42)
+        X_resampled, y_resampled = smote.fit_resample(X, y)
+
+        # Split the resampled data into training and testing sets
+        X_train, X_test, y_train, y_test = train_test_split(X_resampled, y_resampled, test_size=0.2, random_state=42)
+
+        # Standardize the features
+        scaler = StandardScaler()
+        X_train = scaler.fit_transform(X_train)
+        X_test = scaler.transform(X_test)
+
+        # Expanded Hyperparameter Tuning for Random Forest
+        param_grid = {
+            'n_estimators': [100, 200, 300],
+            'max_features': ['auto', 'sqrt', 'log2'],
+            'max_depth': [4, 5, 6, 7, 8],
+            'criterion': ['gini', 'entropy'],
+            'min_samples_split': [2, 5, 10],
+            'min_samples_leaf': [1, 2, 4],
+            'bootstrap': [True, False]
+        }
+
+        grid_search = GridSearchCV(estimator=RandomForestClassifier(random_state=42), param_grid=param_grid, cv=5, n_jobs=-1)
+        grid_search.fit(X_train, y_train)
+
+        # Best parameters from grid search
+        best_params = grid_search.best_params_
+        print('Best parameters found: ', best_params)
+
+        # Train a Random Forest Classifier with best parameters
+        model = RandomForestClassifier(random_state=42, **best_params)
+        model.fit(X_train, y_train)
+
+        # Perform cross-validation
+        cv_scores = cross_val_score(model, X_resampled, y_resampled, cv=5)
+        print('Cross-Validation Scores: ', cv_scores)
+        print('Mean Cross-Validation Score: ', cv_scores.mean())
+
+        # Visualize cross-validation scores
+        plt.figure(figsize=(10, 6))
+        sns.boxplot(data=cv_scores)
+        plt.title('Cross-Validation Scores')
+        plt.xlabel('Cross-Validation')
+        plt.ylabel('Accuracy')
+        plt.savefig('cv_scores.png')
+
+        # Make predictions
+        y_pred = model.predict(X_test)
+
+        # Evaluate the model
+        print('Accuracy:', accuracy_score(y_test, y_pred))
+        print('Classification Report:\\n', classification_report(y_test, y_pred, zero_division=1))
+        print('Confusion Matrix:\\n', confusion_matrix(y_test, y_pred))
+
+        # Feature Importance
+        plt.figure(figsize=(12, 6))
+        sns.barplot(x=model.feature_importances_, y=X.columns)
+        plt.title('Feature Importance')
+        plt.xlabel('Importance')
+        plt.ylabel('Feature')
+        plt.savefig('feature_importance.png')
+        "
+        
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v2
+      with:
+        name: analysis-results
+        path: |
+          cv_scores.png
+          feature_importance.png
