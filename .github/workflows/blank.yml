@@ -3,10 +3,10 @@ name: Healthcare Data Analysis and Predictive Modeling
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
     branches:
-      - master
+      - main
 
 jobs:
   build:
@@ -29,6 +29,7 @@ jobs:
     - name: Run analysis script
       run: |
         python -c "
+        import os
         import pandas as pd
         import matplotlib.pyplot as plt
         import seaborn as sns
@@ -38,8 +39,12 @@ jobs:
         from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
         from imblearn.over_sampling import SMOTE
 
+        # Check if the file exists
+        if not os.path.isfile('healthcare dataset.csv'):
+            raise FileNotFoundError('The dataset file is missing.')
+
         # Load the dataset
-        data = pd.read_csv('healthcare dataset (2).csv')
+        data = pd.read_csv('healthcare dataset.csv')
 
         # Standardize column names
         data.columns = data.columns.str.strip().str.lower().str.replace(' ', '_').str.replace('(', '').str.replace(')', '')
@@ -104,9 +109,13 @@ jobs:
         print('Cross-Validation Scores: ', cv_scores)
         print('Mean Cross-Validation Score: ', cv_scores.mean())
 
+        # Save cross-validation scores to CSV
+        cv_scores_df = pd.DataFrame(cv_scores, columns=['Cross-Validation Score'])
+        cv_scores_df.to_csv('cv_scores.csv', index=False)
+
         # Visualize cross-validation scores
         plt.figure(figsize=(10, 6))
-        sns.boxplot(data=cv_scores)
+        sns.boxplot(data=cv_scores_df)
         plt.title('Cross-Validation Scores')
         plt.xlabel('Cross-Validation')
         plt.ylabel('Accuracy')
@@ -128,11 +137,12 @@ jobs:
         plt.ylabel('Feature')
         plt.savefig('feature_importance.png')
         "
-        
+
     - name: Upload artifacts
       uses: actions/upload-artifact@v2
       with:
         name: analysis-results
         path: |
+          cv_scores.csv
           cv_scores.png
           feature_importance.png
